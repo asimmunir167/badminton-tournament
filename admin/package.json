@@ -1,0 +1,8 @@
+{
+  "name": "@tournament-app/admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Admin panel scaffolding lands in Phase 2 — see roadmap.' && exit 1"
+  }
+}
