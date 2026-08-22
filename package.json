@@ -10,6 +10,8 @@
     "docker:down": "docker compose down",
     "backend:dev": "npm run dev --workspace=backend",
     "backend:build": "npm run build --workspace=backend",
+    "admin:dev": "npm run dev --workspace=admin",
+    "admin:build": "npm run build --workspace=admin",
     "prisma:generate": "npm run prisma:generate --workspace=backend",
     "prisma:migrate": "npm run prisma:migrate --workspace=backend",
     "prisma:studio": "npm run prisma:studio --workspace=backend"

@@ -39,6 +39,18 @@ enum PlayerStatus {
   SUSPENDED
 }
 
+enum PlayerLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum PairStatus {
+  PENDING
+  ACTIVE
+  DECLINED
+}
+
 enum CategoryType {
   SINGLES
   DOUBLES
@@ -364,8 +376,12 @@ model Player {
   photoUrl       String?      @map("photo_url")
   phone          String?
   registrationId String       @unique @map("registration_id")
+  cnic           String?      @unique // required on new profiles (enforced in API layer); nullable in DB for pre-existing rows
   idDocumentUrl  String?      @map("id_document_url") // optional, admin-only visibility enforced in API layer
   status         PlayerStatus @default(ACTIVE)
+  playingLevel   PlayerLevel? @map("playing_level")
+  preferredCategoryType   CategoryType?   @map("preferred_category_type")
+  preferredCategoryGender CategoryGender? @map("preferred_category_gender")
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
@@ -375,6 +391,9 @@ model Player {
   entriesAsPlayer1 CategoryEntry[]  @relation("EntryPlayer1")
   entriesAsPlayer2 CategoryEntry[]  @relation("EntryPlayer2")
   registrations    Registration[]
+  partneredRegistrations Registration[] @relation("RegistrationPartner")
+  pairsAsPlayer1   Pair[]           @relation("PairPlayer1")
+  pairsAsPlayer2   Pair[]           @relation("PairPlayer2")
   certificates     Certificate[]
 
   @@map("players")
@@ -409,24 +428,48 @@ model CategoryEntry {
 // ---------------------------------------------------------------------------
 
 model Registration {
-  id           String              @id @default(uuid())
-  tournamentId String              @map("tournament_id")
-  teamId       String?             @map("team_id")
-  playerId     String?             @map("player_id")
-  categoryId   String?             @map("category_id")
-  status       RegistrationStatus  @default(PENDING)
-  submittedAt  DateTime            @default(now()) @map("submitted_at")
-  reviewedById String?             @map("reviewed_by")
-  reviewedAt   DateTime?           @map("reviewed_at")
+  id              String              @id @default(uuid())
+  tournamentId    String              @map("tournament_id")
+  teamId          String?             @map("team_id")
+  playerId        String?             @map("player_id")
+  partnerPlayerId String?             @map("partner_player_id") // doubles categories only
+  partnerConfirmedAt DateTime?        @map("partner_confirmed_at") // set when the partner accepts the pairing
+  pairId          String?             @map("pair_id") // if set, this registration was submitted using an existing standing Pair
+  categoryId      String?             @map("category_id")
+  status          RegistrationStatus  @default(PENDING)
+  submittedAt     DateTime            @default(now()) @map("submitted_at")
+  reviewedById    String?             @map("reviewed_by")
+  reviewedAt      DateTime?           @map("reviewed_at")
 
   tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   team       Team?      @relation(fields: [teamId], references: [id])
   player     Player?    @relation(fields: [playerId], references: [id])
+  partner    Player?    @relation("RegistrationPartner", fields: [partnerPlayerId], references: [id])
+  pair       Pair?      @relation(fields: [pairId], references: [id])
   category   Category?  @relation(fields: [categoryId], references: [id])
   reviewedBy User?      @relation("RegistrationReviewer", fields: [reviewedById], references: [id])
   payment    Payment?
 
   @@map("registrations")
+}
+
+// A standing doubles partnership, formed once via Find Partner + Accept and
+// reused across tournament applications (independent of any one category).
+model Pair {
+  id          String     @id @default(uuid())
+  pairCode    String     @unique @map("pair_code") // human-friendly, e.g. PAIR-1025
+  player1Id   String     @map("player1_id") // the requester
+  player2Id   String     @map("player2_id") // the invited partner
+  status      PairStatus @default(PENDING)
+  requestedAt DateTime   @default(now()) @map("requested_at")
+  respondedAt DateTime?  @map("responded_at")
+
+  player1 Player @relation("PairPlayer1", fields: [player1Id], references: [id])
+  player2 Player @relation("PairPlayer2", fields: [player2Id], references: [id])
+
+  registrations Registration[]
+
+  @@map("pairs")
 }
 
 model Payment {

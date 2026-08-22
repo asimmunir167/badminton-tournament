@@ -50,3 +50,10 @@ export async function deleteDistrict(id: string) {
   }
   await prisma.district.delete({ where: { id } });
 }
+
+export async function isDistrictManagerOf(districtId: string, userId: string): Promise<boolean> {
+  const link = await prisma.districtManager.findUnique({
+    where: { districtId_userId: { districtId, userId } },
+  });
+  return !!link;
+}

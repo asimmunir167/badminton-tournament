@@ -47,6 +47,10 @@ backend/dist/
 admin/.next/
 admin/out/
 
+# user-uploaded files (local disk storage in dev)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 # logs
 *.log
 npm-debug.log*
