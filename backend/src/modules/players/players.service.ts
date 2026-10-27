@@ -73,9 +73,28 @@ export async function createPlayer(districtId: string, input: CreatePlayerInput,
     }
   }
 
+  const tehsil = input.tehsilId
+    ? await prisma.tehsil.findUnique({ where: { id: input.tehsilId } })
+    : await prisma.tehsil.findFirst({ where: { districtId, name: input.tehsilName! } });
+
+  let tehsilId = tehsil?.id;
+  if (!tehsilId) {
+    if (input.tehsilId) {
+      throw new ApiError(400, "Tehsil does not belong to the selected district");
+    }
+    if (!input.tehsilName) {
+      throw new ApiError(400, "Tehsil is required");
+    }
+    const created = await prisma.tehsil.create({ data: { districtId, name: input.tehsilName } });
+    tehsilId = created.id;
+  } else if (tehsil.districtId !== districtId) {
+    throw new ApiError(400, "Tehsil does not belong to the selected district");
+  }
+
   const registrationId = await generateRegistrationId(district.code);
 
-  return prisma.player.create({ data: { ...input, districtId, userId, registrationId } });
+  const { tehsilId: _tid, tehsilName: _tn, ...playerData } = input;
+  return prisma.player.create({ data: { ...playerData, districtId, tehsilId, userId, registrationId } });
 }
 
 export async function updatePlayer(id: string, input: UpdatePlayerInput) {
@@ -111,14 +130,28 @@ export async function deletePlayer(id: string) {
 }
 
 // "Find Partner" directory: browse/search other players, optionally scoped
-// to a district or preferred doubles category.
+// to a district or preferred doubles category. Players who already have an
+// ACTIVE standing pair are hidden — they are not available to request.
 export async function searchPlayers(query: SearchPlayersQuery, excludePlayerId?: string) {
+  const lockedPairs = await prisma.pair.findMany({
+    where: { status: "ACTIVE" },
+    select: { player1Id: true, player2Id: true },
+  });
+  const lockedIds = new Set<string>();
+  for (const p of lockedPairs) {
+    lockedIds.add(p.player1Id);
+    lockedIds.add(p.player2Id);
+  }
+  if (excludePlayerId) {
+    lockedIds.add(excludePlayerId);
+  }
+
   return prisma.player.findMany({
     where: {
       ...(query.districtId ? { districtId: query.districtId } : {}),
       ...(query.categoryGender ? { preferredCategoryGender: query.categoryGender } : {}),
       ...(query.search ? { fullName: { contains: query.search, mode: "insensitive" } } : {}),
-      ...(excludePlayerId ? { id: { not: excludePlayerId } } : {}),
+      ...(lockedIds.size > 0 ? { id: { notIn: [...lockedIds] } } : {}),
     },
     include: { district: { select: { id: true, name: true } } },
     orderBy: { fullName: "asc" },

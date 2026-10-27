@@ -99,6 +99,10 @@ export async function requireRegistrationViewAccess(req: Request, _res: Response
     next();
     return;
   }
+  if (registration.partner?.userId === sub) {
+    next();
+    return;
+  }
   if (
     role === "district_manager" &&
     registration.player &&

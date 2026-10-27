@@ -5,4 +5,5 @@ import { requireAuth } from "../../middleware/auth";
 export const notificationsRouter = Router();
 notificationsRouter.get("/mine", requireAuth, controller.listMine);
 notificationsRouter.post("/read-all", requireAuth, controller.markAllRead);
+notificationsRouter.post("/push-token", requireAuth, controller.registerPush);
 notificationsRouter.post("/:id/read", requireAuth, controller.markRead);

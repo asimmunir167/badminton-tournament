@@ -84,6 +84,9 @@ export default function FindPartnerScreen() {
           onSubmitEditing={runSearch}
           returnKeyType="search"
         />
+        <Text style={styles.hint}>
+          Players who already have an active pair are hidden — they can only play with their current partner.
+        </Text>
 
         <View style={styles.filterRow}>
           <FilterPill
@@ -147,6 +150,7 @@ function FilterPill({ label, active, onPress }: { label: string; active: boolean
 
 const styles = StyleSheet.create({
   header: { padding: spacing.lg, gap: spacing.sm },
+  hint: { color: colors.textOnDarkMuted, fontSize: 12, lineHeight: 16 },
   searchInput: {
     backgroundColor: colors.navyLight,
     borderRadius: radius.md,

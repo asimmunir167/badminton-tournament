@@ -1,5 +1,6 @@
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/errorHandler";
+import { seedTehsilsForDistrict } from "../tehsils/tehsils.service";
 import type { CreateDistrictInput, UpdateDistrictInput } from "./districts.validation";
 
 export async function listDistricts() {
@@ -21,7 +22,9 @@ export async function createDistrict(input: CreateDistrictInput) {
   if (existing) {
     throw new ApiError(409, "A district with this name or code already exists");
   }
-  return prisma.district.create({ data: input });
+  const district = await prisma.district.create({ data: input });
+  await seedTehsilsForDistrict(district.id);
+  return district;
 }
 
 export async function updateDistrict(id: string, input: UpdateDistrictInput) {

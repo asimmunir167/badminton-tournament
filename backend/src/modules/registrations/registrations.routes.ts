@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as controller from "./registrations.controller";
 import { requireAuth } from "../../middleware/auth";
+import { uploadImage } from "../../lib/uploads";
 import {
   requireRegistrationAdminAccess,
   requireRegistrationCreateAccess,
@@ -28,3 +29,10 @@ registrationsRouter.get("/:id", requireAuth, requireRegistrationViewAccess, cont
 registrationsRouter.patch("/:id/status", requireAuth, requireRegistrationAdminAccess, controller.review);
 registrationsRouter.post("/:id/payment", requireAuth, requireRegistrationAdminAccess, controller.createPayment);
 registrationsRouter.patch("/:id/payment", requireAuth, requireRegistrationAdminAccess, controller.updatePayment);
+registrationsRouter.post("/:id/payment/submit", requireAuth, controller.submitPayment);
+registrationsRouter.post(
+  "/:id/payment/proof",
+  requireAuth,
+  uploadImage.single("proof"),
+  controller.uploadProof,
+);

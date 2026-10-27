@@ -13,6 +13,7 @@ interface Category {
   type: string;
   gender: string;
   ageGroup: string | null;
+  entryFee: string | null;
 }
 
 export default function CategoriesPage() {
@@ -84,6 +85,9 @@ export default function CategoriesPage() {
                 {c.type} · {c.gender}
                 {c.ageGroup ? ` · ${c.ageGroup}` : ""}
               </p>
+              <p className="mt-1 text-xs text-emerald-400">
+                {c.entryFee && Number(c.entryFee) > 0 ? `Fee: PKR ${Number(c.entryFee).toLocaleString()}` : "Free entry"}
+              </p>
             </Link>
           ))}
           {categories.length === 0 && <p className="text-slate-500">No categories yet.</p>}
@@ -95,7 +99,7 @@ export default function CategoriesPage() {
 
 function CreateCategoryForm({ tournamentId, onCreated }: { tournamentId: string; onCreated: () => void }) {
   const api = useApiClient();
-  const [form, setForm] = useState({ name: "", type: "SINGLES", gender: "MEN", ageGroup: "" });
+  const [form, setForm] = useState({ name: "", type: "SINGLES", gender: "MEN", ageGroup: "", entryFee: "" });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -106,7 +110,11 @@ function CreateCategoryForm({ tournamentId, onCreated }: { tournamentId: string;
     try {
       await api(`/api/tournaments/${tournamentId}/categories`, {
         method: "POST",
-        body: { ...form, ageGroup: form.ageGroup || undefined },
+        body: {
+          ...form,
+          ageGroup: form.ageGroup || undefined,
+          entryFee: form.entryFee ? Number(form.entryFee) : undefined,
+        },
       });
       onCreated();
     } catch (err) {
@@ -146,6 +154,17 @@ function CreateCategoryForm({ tournamentId, onCreated }: { tournamentId: string;
             value={form.ageGroup}
             onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}
             placeholder="e.g. Under 19"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Entry Fee (PKR, optional)">
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={form.entryFee}
+            onChange={(e) => setForm({ ...form, entryFee: e.target.value })}
+            placeholder="0 = free"
             className={inputClass}
           />
         </Field>

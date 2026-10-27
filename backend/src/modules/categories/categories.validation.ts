@@ -6,6 +6,7 @@ export const createCategorySchema = z.object({
   gender: z.enum(["MEN", "WOMEN", "MIXED"]),
   ageGroup: z.string().max(40).optional(),
   maxEntries: z.number().int().positive().optional(),
+  entryFee: z.number().nonnegative().optional(),
 });
 
 export const updateCategorySchema = z.object({
@@ -14,6 +15,7 @@ export const updateCategorySchema = z.object({
   gender: z.enum(["MEN", "WOMEN", "MIXED"]).optional(),
   ageGroup: z.string().max(40).optional(),
   maxEntries: z.number().int().positive().optional(),
+  entryFee: z.number().nonnegative().optional(),
 });
 
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;

@@ -31,3 +31,15 @@ export const markAllRead = wrap(async (req, res) => {
   await notificationsService.markAllRead(req.user.sub);
   res.status(204).send();
 });
+
+export const registerPush = wrap(async (req, res) => {
+  if (!req.user) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  const token = String(req.body?.token ?? "");
+  if (!token) {
+    throw new ApiError(400, "token is required");
+  }
+  const user = await notificationsService.registerPushToken(req.user.sub, token);
+  res.status(200).json(user);
+});

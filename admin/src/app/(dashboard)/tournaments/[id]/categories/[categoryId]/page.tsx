@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useApiClient, useAuth } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api";
@@ -11,6 +12,7 @@ interface Category {
   name: string;
   type: "SINGLES" | "DOUBLES";
   gender: string;
+  entryFee: string | null;
 }
 interface Player {
   id: string;
@@ -41,12 +43,14 @@ interface Draw {
 }
 
 function entryLabel(entry: Entry | null): string {
-  if (!entry) return "TBD";
-  return entry.player2 ? `${entry.player1.fullName} / ${entry.player2.fullName}` : entry.player1.fullName;
+  if (!entry?.player1) return "TBD";
+  return entry.player2?.fullName
+    ? `${entry.player1.fullName} / ${entry.player2.fullName}`
+    : entry.player1.fullName;
 }
 
 export default function CategoryDetailPage() {
-  const { categoryId } = useParams<{ id: string; categoryId: string }>();
+  const { id: tournamentId, categoryId } = useParams<{ id: string; categoryId: string }>();
   const api = useApiClient();
   const { user } = useAuth();
   const [category, setCategory] = useState<Category | null>(null);
@@ -104,6 +108,13 @@ export default function CategoryDetailPage() {
         {category.type} · {category.gender}
       </p>
 
+      <EntryFeeEditor
+        categoryId={categoryId}
+        entryFee={category.entryFee}
+        canManage={canManage}
+        onSaved={(fee) => setCategory((c) => (c ? { ...c, entryFee: fee } : c))}
+      />
+
       <div className="mt-8">
         <h2 className="mb-4 text-lg font-semibold text-white">Entries</h2>
 
@@ -138,7 +149,98 @@ export default function CategoryDetailPage() {
         </div>
       </div>
 
-      <DrawSection categoryId={categoryId} draw={draw} canManage={canManage} onChanged={refreshDraw} />
+      <DrawSection
+        tournamentId={tournamentId}
+        categoryId={categoryId}
+        draw={draw}
+        canManage={canManage}
+        onChanged={refreshDraw}
+      />
+    </div>
+  );
+}
+
+function EntryFeeEditor({
+  categoryId,
+  entryFee,
+  canManage,
+  onSaved,
+}: {
+  categoryId: string;
+  entryFee: string | null;
+  canManage: boolean;
+  onSaved: (entryFee: string | null) => void;
+}) {
+  const api = useApiClient();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(entryFee ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setError(null);
+    setSaving(true);
+    try {
+      const updated = await api<{ entryFee: string | null }>(`/api/categories/${categoryId}`, {
+        method: "PATCH",
+        body: { entryFee: value ? Number(value) : 0 },
+      });
+      onSaved(updated.entryFee);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update entry fee.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="mt-4 rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-400">2. Entry fee for this category</p>
+            <p className="mt-1 text-lg font-semibold text-white">
+              {entryFee && Number(entryFee) > 0
+                ? `PKR ${Number(entryFee).toLocaleString()}`
+                : "Free entry (players will not see payment)"}
+            </p>
+          </div>
+          {canManage && (
+            <button
+              onClick={() => setEditing(true)}
+              className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-600"
+            >
+              {entryFee && Number(entryFee) > 0 ? "Change fee" : "Set entry fee"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <input
+        type="number"
+        min={0}
+        step="0.01"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="0 = free"
+        className={inputClass}
+      />
+      <button
+        disabled={saving}
+        onClick={save}
+        className="rounded-md bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+      >
+        Save
+      </button>
+      <button onClick={() => setEditing(false)} className="text-xs text-slate-400 hover:underline">
+        Cancel
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
@@ -229,27 +331,58 @@ function AddEntryForm({
 }
 
 function DrawSection({
+  tournamentId,
   categoryId,
   draw,
   canManage,
   onChanged,
 }: {
+  tournamentId: string;
   categoryId: string;
   draw: Draw | null;
   canManage: boolean;
   onChanged: () => void;
 }) {
   const api = useApiClient();
-  const [format, setFormat] = useState<"KNOCKOUT" | "ROUND_ROBIN">("KNOCKOUT");
+  const [format, setFormat] = useState<"KNOCKOUT" | "ROUND_ROBIN" | "GROUP_KNOCKOUT" | "TEHSIL_KNOCKOUT">("KNOCKOUT");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scheduleNote, setScheduleNote] = useState<string | null>(null);
 
   async function run(fn: () => Promise<unknown>) {
     setError(null);
+    setScheduleNote(null);
     setBusy(true);
     try {
       await fn();
       onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateAndSchedule() {
+    setError(null);
+    setScheduleNote(null);
+    setBusy(true);
+    try {
+      await api(`/api/categories/${categoryId}/draw/generate`, { method: "POST", body: { format } });
+      onChanged();
+      try {
+        await api(`/api/tournaments/${tournamentId}/matches/auto-schedule`, {
+          method: "POST",
+          body: { categoryId, startTime: "09:00", matchDurationMinutes: 45, breakMinutes: 15 },
+        });
+        setScheduleNote("Draw generated and matches auto-scheduled. Open Fixtures to see the visual board.");
+      } catch (err) {
+        setScheduleNote(
+          err instanceof ApiError
+            ? `Draw generated. Schedule skipped: ${err.message}`
+            : "Draw generated. Add courts, then auto-schedule from Fixtures.",
+        );
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Action failed.");
     } finally {
@@ -274,20 +407,40 @@ function DrawSection({
           <div className="flex items-center gap-2">
             <select
               value={format}
-              onChange={(e) => setFormat(e.target.value as "KNOCKOUT" | "ROUND_ROBIN")}
+              onChange={(e) => setFormat(e.target.value as "KNOCKOUT" | "ROUND_ROBIN" | "GROUP_KNOCKOUT" | "TEHSIL_KNOCKOUT")}
               className={inputClass}
             >
               <option value="KNOCKOUT">Knockout</option>
               <option value="ROUND_ROBIN">Round Robin</option>
+              <option value="GROUP_KNOCKOUT">Group + Knockout</option>
+              <option value="TEHSIL_KNOCKOUT">Tehsil + District Knockout</option>
             </select>
+            <button
+              disabled={busy || draw?.isLocked}
+              onClick={generateAndSchedule}
+              className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            >
+              {draw ? "Regenerate + schedule" : "Generate draw + schedule"}
+            </button>
+            {(draw?.format === "GROUP_KNOCKOUT" || draw?.format === "TEHSIL_KNOCKOUT") && (
+              <button
+                disabled={busy || draw.isLocked}
+                onClick={() =>
+                  run(() => api(`/api/categories/${categoryId}/draw/advance`, { method: "POST", body: {} }))
+                }
+                className="rounded-md bg-violet-700 px-3 py-2 text-sm font-medium text-white hover:bg-violet-600 disabled:opacity-50"
+              >
+                {draw.format === "TEHSIL_KNOCKOUT" ? "Advance to district KO" : "Advance to knockout"}
+              </button>
+            )}
             <button
               disabled={busy || draw?.isLocked}
               onClick={() =>
                 run(() => api(`/api/categories/${categoryId}/draw/generate`, { method: "POST", body: { format } }))
               }
-              className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+              className="rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
             >
-              {draw ? "Regenerate" : "Generate Draw"}
+              Draw only
             </button>
             {draw && (
               <button
@@ -309,6 +462,14 @@ function DrawSection({
       </div>
 
       {error && <p className="mb-4 text-red-400">{error}</p>}
+      {scheduleNote && (
+        <p className="mb-4 rounded-md border border-sky-900/50 bg-sky-950/40 px-3 py-2 text-sm text-sky-100">
+          {scheduleNote}{" "}
+          <Link href={`/tournaments/${tournamentId}/matches`} className="underline hover:text-white">
+            Open Fixtures →
+          </Link>
+        </p>
+      )}
 
       {!draw && <p className="text-slate-500">No draw generated yet.</p>}
 

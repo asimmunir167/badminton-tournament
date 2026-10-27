@@ -26,8 +26,10 @@ interface Match {
 }
 
 function entryLabel(entry: Entry | null): string {
-  if (!entry) return "TBD";
-  return entry.player2 ? `${entry.player1.fullName} / ${entry.player2.fullName}` : entry.player1.fullName;
+  if (!entry?.player1) return "TBD";
+  return entry.player2?.fullName
+    ? `${entry.player1.fullName} / ${entry.player2.fullName}`
+    : entry.player1.fullName;
 }
 
 export default function LiveIndexPage() {

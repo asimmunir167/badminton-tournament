@@ -69,6 +69,13 @@ export default function MyPairScreen() {
           <Text style={styles.emptyText}>You don&apos;t have a pair yet. Find a partner to get started.</Text>
         )}
 
+        {pairs.some((p) => p.status === 'ACTIVE') && (
+          <Text style={styles.infoText}>
+            You have an active pair. While you are paired, other players cannot send you new partner requests, and you
+            cannot request someone else.
+          </Text>
+        )}
+
         {pairs.map((pair) => {
           const otherPlayerId = pair.player1.id === myPlayerId ? pair.player2.id : pair.player1.id;
           return (
@@ -113,6 +120,13 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   error: { color: '#ffb4b4', textAlign: 'center' },
   emptyText: { color: colors.textOnDarkMuted, textAlign: 'center', marginTop: spacing.xl },
+  infoText: {
+    color: colors.textOnDarkMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+    lineHeight: 18,
+  },
   card: { gap: spacing.sm },
   pairRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.md, marginTop: spacing.sm },
   avatarPair: {

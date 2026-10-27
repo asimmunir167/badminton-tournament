@@ -2,16 +2,23 @@ import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/errorHandler";
 import type { CreateCourtInput, UpdateCourtInput } from "./courts.validation";
 
+const ENTRY_INCLUDE = {
+  include: {
+    player1: { select: { id: true, fullName: true } },
+    player2: { select: { id: true, fullName: true } },
+  },
+} as const;
+
 async function attachMatchInfo<T extends { id: string }>(court: T) {
   const [currentMatch, nextMatch] = await Promise.all([
     prisma.match.findFirst({
       where: { courtId: court.id, status: "LIVE" },
-      include: { entry1: true, entry2: true, category: true },
+      include: { entry1: ENTRY_INCLUDE, entry2: ENTRY_INCLUDE, category: true },
     }),
     prisma.match.findFirst({
       where: { courtId: court.id, status: { in: ["SCHEDULED", "STARTING_SOON"] } },
       orderBy: [{ round: "asc" }, { matchNumber: "asc" }],
-      include: { entry1: true, entry2: true, category: true },
+      include: { entry1: ENTRY_INCLUDE, entry2: ENTRY_INCLUDE, category: true },
     }),
   ]);
   return { ...court, currentMatch, nextMatch };

@@ -26,6 +26,12 @@ import { categoryRankingsRouter, rankingsRouter, tournamentRankingsRouter } from
 import { usersRouter } from "./modules/users/users.routes";
 import { pairsRouter } from "./modules/pairs/pairs.routes";
 import { notificationsRouter } from "./modules/notifications/notifications.routes";
+import { publicRouter } from "./modules/public/public.routes";
+import { opsRouter } from "./modules/ops/ops.routes";
+import {
+  categoryCertificatesRouter,
+  tournamentCertificatesRouter,
+} from "./modules/certificates/certificates.routes";
 
 const app = express();
 
@@ -46,14 +52,21 @@ app.get("/health", async (_req, res) => {
   }
 
   try {
-    await redis.ping();
-    checks.redis = true;
+    const pong = await Promise.race([
+      redis.ping(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+    ]);
+    checks.redis = pong === "PONG";
   } catch {
     checks.redis = false;
   }
 
-  const ok = checks.database && checks.redis;
-  res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "degraded", checks });
+  // Database is required; Redis is optional (used for future caching / health only).
+  const ok = checks.database;
+  res.status(ok ? 200 : 503).json({
+    status: ok ? (checks.redis ? "ok" : "degraded") : "down",
+    checks,
+  });
 });
 
 app.use("/api/auth", authRouter);
@@ -83,6 +96,10 @@ app.use("/api/rankings", rankingsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/pairs", pairsRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/public", publicRouter);
+app.use("/api/ops", opsRouter);
+app.use("/api/categories/:categoryId/certificates", categoryCertificatesRouter);
+app.use("/api/tournaments/:tournamentId/certificates", tournamentCertificatesRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

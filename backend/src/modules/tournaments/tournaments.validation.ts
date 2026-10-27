@@ -8,6 +8,24 @@ const scoringConfigSchema = z
   })
   .partial();
 
+const walletAccountSchema = z.object({
+  number: z.string().min(8).max(20),
+  accountName: z.string().min(2).max(120),
+});
+
+const bankAccountSchema = z.object({
+  bankName: z.string().min(2).max(80),
+  accountTitle: z.string().min(2).max(160),
+  accountNumber: z.string().min(4).max(40),
+  iban: z.string().max(34).optional(),
+});
+
+export const paymentAccountsSchema = z.object({
+  jazzCash: walletAccountSchema.optional(),
+  easyPaisa: walletAccountSchema.optional(),
+  bank: bankAccountSchema.optional(),
+});
+
 const baseFields = {
   name: z.string().min(3).max(160),
   logoUrl: z.string().url(),
@@ -20,6 +38,8 @@ const baseFields = {
   organizer: z.string().max(200),
   contactInfo: z.string().max(200),
   rulesText: z.string().max(10000),
+  paymentInstructions: z.string().max(2000),
+  paymentAccounts: paymentAccountsSchema,
   maxTeams: z.number().int().positive(),
   maxPlayers: z.number().int().positive(),
   format: z.enum(["KNOCKOUT", "ROUND_ROBIN", "GROUP_KNOCKOUT"]),
@@ -39,6 +59,8 @@ export const createTournamentSchema = z
     organizer: baseFields.organizer.optional(),
     contactInfo: baseFields.contactInfo.optional(),
     rulesText: baseFields.rulesText.optional(),
+    paymentInstructions: baseFields.paymentInstructions.optional(),
+    paymentAccounts: baseFields.paymentAccounts.optional(),
     maxTeams: baseFields.maxTeams.optional(),
     maxPlayers: baseFields.maxPlayers.optional(),
     format: baseFields.format.default("KNOCKOUT"),
@@ -65,6 +87,8 @@ export const updateTournamentSchema = z.object({
   organizer: baseFields.organizer.optional(),
   contactInfo: baseFields.contactInfo.optional(),
   rulesText: baseFields.rulesText.optional(),
+  paymentInstructions: baseFields.paymentInstructions.optional(),
+  paymentAccounts: baseFields.paymentAccounts.nullable().optional(),
   maxTeams: baseFields.maxTeams.optional(),
   maxPlayers: baseFields.maxPlayers.optional(),
   format: baseFields.format.optional(),

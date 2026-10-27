@@ -21,6 +21,8 @@ interface Match {
   round: number;
   matchNumber: number;
   status: string;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
   entry1: Entry | null;
   entry2: Entry | null;
   winnerEntryId: string | null;
@@ -176,7 +178,15 @@ export default function FixturesScreen() {
                     </View>
                     <View style={styles.matchMeta}>
                       <Badge label={m.status} tone={m.status === 'LIVE' ? 'red' : m.status === 'COMPLETED' ? 'green' : 'neutral'} />
-                      {m.court && <Text style={styles.courtText}>{m.court.name}</Text>}
+                      <Text style={styles.courtText}>
+                        {[
+                          m.scheduledTime,
+                          m.court?.name,
+                          m.scheduledDate ? new Date(m.scheduledDate).toLocaleDateString() : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'TBD'}
+                      </Text>
                     </View>
                   </Card>
                 </Pressable>

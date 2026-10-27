@@ -62,6 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const me = await apiFetch<AuthUser>('/api/auth/me', { token: stored.accessToken });
         setUser(me);
+        void import('./push').then(({ registerForPushNotifications }) =>
+          registerForPushNotifications(stored.accessToken),
+        );
       } catch {
         await removeItem(STORAGE_KEY);
         setAccessToken(null);
@@ -75,6 +78,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await setItem(STORAGE_KEY, JSON.stringify({ accessToken: result.accessToken, refreshToken: result.refreshToken }));
     setAccessToken(result.accessToken);
     setUser(result.user);
+    void import('./push').then(({ registerForPushNotifications }) =>
+      registerForPushNotifications(result.accessToken),
+    );
   }, []);
 
   const loginWithPassword = useCallback(

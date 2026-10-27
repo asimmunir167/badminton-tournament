@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -18,10 +18,13 @@ import { ApiError, uploadFile } from '../lib/api';
 import { colors, radius, spacing, typography } from '../lib/theme';
 import { GoldButton } from '../components/ui';
 import { calculateAge, formatCnicInput, isValidCnic, isValidDob } from '../lib/format';
+import { PUNJAB_DISTRICTS, tehsilsForDistrictCode } from '../lib/punjab-locations';
+import { PickerField } from '../components/picker-field';
 
-interface District {
+interface ApiDistrict {
   id: string;
   name: string;
+  code: string;
 }
 
 interface PickedPhoto {
@@ -34,8 +37,9 @@ export default function CreateProfileScreen() {
   const router = useRouter();
   const api = useApiClient();
   const { user, accessToken } = useAuth();
-  const [districts, setDistricts] = useState<District[]>([]);
-  const [districtId, setDistrictId] = useState('');
+  const [apiDistricts, setApiDistricts] = useState<ApiDistrict[]>([]);
+  const [districtCode, setDistrictCode] = useState('');
+  const [tehsilName, setTehsilName] = useState('');
   const [fullName, setFullName] = useState(user?.fullName ?? '');
   const [fatherName, setFatherName] = useState('');
   const [dob, setDob] = useState('');
@@ -48,15 +52,31 @@ export default function CreateProfileScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    api<District[]>('/api/districts')
-      .then((data) => {
-        setDistricts(data);
-        if (data.length > 0) setDistrictId(data[0].id);
-      })
-      .catch(() => setError('Could not load districts.'))
+    api<ApiDistrict[]>('/api/districts')
+      .then(setApiDistricts)
+      .catch(() => setError('Could not load districts from server.'))
       .finally(() => setLoadingDistricts(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const districtOptions = useMemo(
+    () => PUNJAB_DISTRICTS.map((d) => ({ value: d.code, label: d.name })),
+    [],
+  );
+
+  const tehsilOptions = useMemo(() => {
+    if (!districtCode) return [];
+    const district = PUNJAB_DISTRICTS.find((d) => d.code === districtCode);
+    return tehsilsForDistrictCode(districtCode, district?.name).map((name) => ({
+      value: name,
+      label: name,
+    }));
+  }, [districtCode]);
+
+  function onDistrictChange(code: string) {
+    setDistrictCode(code);
+    setTehsilName('');
+  }
 
   async function pickPhoto() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -77,8 +97,18 @@ export default function CreateProfileScreen() {
 
   async function onSubmit() {
     setError(null);
-    if (!districtId) {
+    if (!districtCode) {
       setError('Please select a district.');
+      return;
+    }
+    if (!tehsilName) {
+      setError('Please select your tehsil.');
+      return;
+    }
+    const district = apiDistricts.find((d) => d.code === districtCode);
+    if (!district) {
+      const label = PUNJAB_DISTRICTS.find((d) => d.code === districtCode)?.name ?? 'This district';
+      setError(`${label} is not open for registration yet. Ask the admin to add it first.`);
       return;
     }
     if (!isValidDob(dob)) {
@@ -91,7 +121,7 @@ export default function CreateProfileScreen() {
     }
     setSubmitting(true);
     try {
-      await api(`/api/districts/${districtId}/players`, {
+      await api(`/api/districts/${district.id}/players`, {
         method: 'POST',
         body: {
           fullName: fullName.trim(),
@@ -100,6 +130,7 @@ export default function CreateProfileScreen() {
           cnic,
           gender,
           phone: phone.trim() || undefined,
+          tehsilName,
         },
       });
 
@@ -113,7 +144,7 @@ export default function CreateProfileScreen() {
             mimeType: photo.mimeType,
           });
         } catch {
-          // profile is already created; photo can be added later from the Profile screen
+          // profile created; photo optional
         }
       }
 
@@ -138,7 +169,7 @@ export default function CreateProfileScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.title}>Complete Your Player Profile</Text>
-          <Text style={styles.subtitle}>This is needed before you can apply to any tournament category.</Text>
+          <Text style={styles.subtitle}>Select your district and tehsil for tournament placement.</Text>
 
           {error && <Text style={styles.error}>{error}</Text>}
 
@@ -183,21 +214,22 @@ export default function CreateProfileScreen() {
             ))}
           </View>
 
-          <Text style={styles.label}>District</Text>
-          <View style={styles.pillRow}>
-            {districts.map((d) => (
-              <Pressable
-                key={d.id}
-                style={[styles.pill, districtId === d.id && styles.pillActive]}
-                onPress={() => setDistrictId(d.id)}
-              >
-                <Text style={[styles.pillText, districtId === d.id && styles.pillTextActive]}>{d.name}</Text>
-              </Pressable>
-            ))}
-            {districts.length === 0 && (
-              <Text style={styles.emptyText}>No districts have been added yet — check back later.</Text>
-            )}
-          </View>
+          <PickerField
+            label="District"
+            value={districtCode}
+            options={districtOptions}
+            onChange={onDistrictChange}
+            placeholder="Select your district"
+          />
+
+          <PickerField
+            label="Tehsil"
+            value={tehsilName}
+            options={tehsilOptions}
+            onChange={setTehsilName}
+            placeholder={districtCode ? 'Select your tehsil' : 'Select district first'}
+            disabled={!districtCode}
+          />
 
           <Text style={styles.label}>Phone (optional)</Text>
           <TextInput style={styles.input} keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
@@ -255,6 +287,5 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: colors.navy, borderColor: colors.navy },
   pillText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
   pillTextActive: { color: '#fff' },
-  emptyText: { fontSize: 13, color: colors.textSecondary },
   buttonWrap: { marginTop: spacing.lg },
 });

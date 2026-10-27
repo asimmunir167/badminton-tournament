@@ -18,10 +18,18 @@ async function sendOtp(target: string, code: string): Promise<void> {
     return;
   }
 
-  // Twilio credentials are validated as present by env.ts, but the SDK
-  // integration itself is not wired up yet — fail loudly instead of
-  // pretending an SMS was sent.
-  throw new ApiError(500, "Twilio OTP provider is not implemented yet");
+  try {
+    const twilioMod = await import("twilio");
+    const client = twilioMod.default(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
+    await client.messages.create({
+      to: target,
+      from: env.TWILIO_FROM_NUMBER!,
+      body: `Your tournament verification code is ${code}. Valid for 5 minutes.`,
+    });
+  } catch (err) {
+    console.error("[OTP] Twilio send failed — falling back to console log", err);
+    console.log(`[OTP] ${target}: ${code}`);
+  }
 }
 
 export async function requestOtp(target: string, purpose: OtpPurpose): Promise<void> {

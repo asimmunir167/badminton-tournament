@@ -1,6 +1,7 @@
 import { RankingEntityType } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/errorHandler";
+import { KO_ROUND_BASE } from "../draws/bracket";
 
 // Simple medal-table point values — the spec doesn't mandate numbers, so
 // these are a reasonable default (gold=5, silver=3, bronze=1, else 0).
@@ -47,8 +48,13 @@ interface Placement {
 
 // Champion + runner-up from the final; both semifinal losers share bronze
 // (there's no 3rd-place playoff match in the bracket generator).
-async function computeKnockoutPlacements(drawId: string): Promise<Placement[]> {
-  const final = await prisma.match.findFirst({ where: { drawId }, orderBy: { round: "desc" } });
+async function computeKnockoutPlacements(drawId: string, format?: string): Promise<Placement[]> {
+  const roundFilter =
+    format === "GROUP_KNOCKOUT" || format === "TEHSIL_KNOCKOUT" ? { gte: KO_ROUND_BASE } : undefined;
+  const final = await prisma.match.findFirst({
+    where: { drawId, ...(roundFilter ? { round: roundFilter } : {}) },
+    orderBy: { round: "desc" },
+  });
   if (!final || final.status !== "COMPLETED" || !final.winnerEntryId || !final.entry1Id || !final.entry2Id) {
     throw new ApiError(409, "The final has not been completed yet");
   }
@@ -134,7 +140,9 @@ export async function computeCategoryPlacements(categoryId: string) {
   const placements =
     draw.format === "ROUND_ROBIN"
       ? await computeRoundRobinPlacements(draw.id, entries)
-      : await computeKnockoutPlacements(draw.id);
+      : draw.format === "TEHSIL_KNOCKOUT" || draw.format === "GROUP_KNOCKOUT"
+        ? await computeKnockoutPlacements(draw.id, draw.format)
+        : await computeKnockoutPlacements(draw.id);
 
   const rows = placements.flatMap(({ entryId, rank }) => {
     const entry = entryById.get(entryId);

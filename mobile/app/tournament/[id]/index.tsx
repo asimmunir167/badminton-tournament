@@ -19,6 +19,7 @@ interface Category {
   name: string;
   type: string;
   gender: string;
+  entryFee: string | null;
 }
 
 interface EntryPlayer {
@@ -140,6 +141,11 @@ export default function TournamentDetailScreen() {
                     onPress={() => router.push(`/category/${c.id}/apply`)}
                   >
                     <Text style={styles.categoryChipText}>{c.name}</Text>
+                    <Text style={styles.categoryChipFee}>
+                      {c.entryFee && Number(c.entryFee) > 0
+                        ? `PKR ${Number(c.entryFee).toLocaleString()}`
+                        : 'Free'}
+                    </Text>
                   </Pressable>
                 ))}
               </View>
@@ -195,6 +201,7 @@ const styles = StyleSheet.create({
   categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   categoryChip: { backgroundColor: colors.gold, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 },
   categoryChipText: { fontSize: 12, fontWeight: '700', color: colors.navy },
+  categoryChipFee: { fontSize: 10, fontWeight: '600', color: colors.navy, opacity: 0.75, marginTop: 2 },
   linkRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
   rankingsLink: {},
   rankingsLinkText: { fontSize: 14, fontWeight: '700', color: colors.gold },

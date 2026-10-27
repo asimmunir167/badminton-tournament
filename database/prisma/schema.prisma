@@ -66,6 +66,7 @@ enum TournamentFormat {
   KNOCKOUT
   ROUND_ROBIN
   GROUP_KNOCKOUT
+  TEHSIL_KNOCKOUT
 }
 
 enum TournamentStatus {
@@ -152,6 +153,7 @@ enum NotificationType {
   SEMI_FINAL
   FINAL
   TOURNAMENT_CHAMPION
+  PAYMENT_RECEIVED
 }
 
 // ---------------------------------------------------------------------------
@@ -170,15 +172,16 @@ model Role {
 }
 
 model User {
-  id           String     @id @default(uuid())
-  phone        String?    @unique
-  email        String?    @unique
-  passwordHash String?    @map("password_hash")
-  fullName     String     @map("full_name")
-  roleId       String     @map("role_id")
-  status       UserStatus @default(PENDING)
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id            String     @id @default(uuid())
+  phone         String?    @unique
+  email         String?    @unique
+  passwordHash  String?    @map("password_hash")
+  fullName      String     @map("full_name")
+  roleId        String     @map("role_id")
+  status        UserStatus @default(PENDING)
+  expoPushToken String?    @map("expo_push_token")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
 
   role                Role                @relation(fields: [roleId], references: [id])
   districtManagerOf   DistrictManager[]
@@ -244,8 +247,23 @@ model District {
   managers DistrictManager[]
   teams    Team[]
   players  Player[]
+  tehsils  Tehsil[]
 
   @@map("districts")
+}
+
+model Tehsil {
+  id         String   @id @default(uuid())
+  districtId String   @map("district_id")
+  name       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  district District @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  players  Player[]
+  matches  Match[]
+
+  @@unique([districtId, name])
+  @@map("tehsils")
 }
 
 model DistrictManager {
@@ -279,6 +297,11 @@ model Tournament {
   organizer            String?
   contactInfo          String?           @map("contact_info")
   rulesText            String?           @map("rules_text")
+  paymentInstructions  String?           @map("payment_instructions") // extra notes shown with the structured accounts below
+  // JazzCash / Easypaisa / bank details the player pays to. Shape:
+  // { jazzCash?: { number, accountName }, easyPaisa?: { number, accountName },
+  //   bank?: { bankName, accountTitle, accountNumber, iban? } }
+  paymentAccounts      Json?             @map("payment_accounts")
   maxTeams             Int?              @map("max_teams")
   maxPlayers           Int?              @map("max_players")
   format               TournamentFormat  @default(KNOCKOUT)
@@ -322,6 +345,7 @@ model Category {
   gender       CategoryGender
   ageGroup     String?        @map("age_group")
   maxEntries   Int?           @map("max_entries")
+  entryFee     Decimal?       @db.Decimal(10, 2) @map("entry_fee") // null/0 = free entry
   createdAt    DateTime       @default(now()) @map("created_at")
 
   tournament     Tournament       @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
@@ -368,6 +392,7 @@ model Player {
   id             String       @id @default(uuid())
   userId         String?      @unique @map("user_id")
   districtId     String       @map("district_id")
+  tehsilId       String?      @map("tehsil_id")
   teamId         String?      @map("team_id")
   fullName       String       @map("full_name")
   fatherName     String?      @map("father_name")
@@ -387,6 +412,7 @@ model Player {
 
   user             User?            @relation(fields: [userId], references: [id])
   district         District         @relation(fields: [districtId], references: [id])
+  tehsil           Tehsil?          @relation(fields: [tehsilId], references: [id])
   team             Team?            @relation(fields: [teamId], references: [id])
   entriesAsPlayer1 CategoryEntry[]  @relation("EntryPlayer1")
   entriesAsPlayer2 CategoryEntry[]  @relation("EntryPlayer2")
@@ -480,6 +506,7 @@ model Payment {
   method          PaymentMethod @default(MANUAL)
   status          PaymentStatus @default(PENDING)
   transactionRef  String?       @map("transaction_ref")
+  proofUrl        String?       @map("proof_url") // screenshot of JazzCash / bank transfer receipt
   paidAt          DateTime?     @map("paid_at")
   createdAt       DateTime      @default(now()) @map("created_at")
 
@@ -553,6 +580,7 @@ model Match {
   scheduledTime  String?     @map("scheduled_time")
   courtId        String?     @map("court_id")
   refereeId      String?     @map("referee_id")
+  tehsilId       String?     @map("tehsil_id")
   status         MatchStatus @default(SCHEDULED)
   winnerEntryId  String?     @map("winner_entry_id")
   nextMatchId    String?     @map("next_match_id") // propagation target
@@ -564,6 +592,7 @@ model Match {
   category     Category       @relation(fields: [categoryId], references: [id])
   court        Court?         @relation(fields: [courtId], references: [id])
   referee      Referee?       @relation(fields: [refereeId], references: [id])
+  tehsil       Tehsil?        @relation(fields: [tehsilId], references: [id])
   entry1       CategoryEntry? @relation("MatchEntry1", fields: [entry1Id], references: [id])
   entry2       CategoryEntry? @relation("MatchEntry2", fields: [entry2Id], references: [id])
   winnerEntry  CategoryEntry? @relation("MatchWinner", fields: [winnerEntryId], references: [id])

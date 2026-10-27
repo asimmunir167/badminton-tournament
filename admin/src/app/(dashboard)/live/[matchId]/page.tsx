@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useApiClient, useAuth } from "@/lib/auth-context";
 import { useMatchState, type Entry } from "@/lib/use-match-state";
@@ -9,9 +9,13 @@ import { ApiError } from "@/lib/api";
 const OFFICIATE_ROLES = ["super_admin", "tournament_admin", "referee"];
 
 function entryLabel(entry: Entry | null): string {
-  if (!entry) return "TBD";
-  return entry.player2 ? `${entry.player1.fullName} / ${entry.player2.fullName}` : entry.player1.fullName;
+  if (!entry?.player1) return "TBD";
+  return entry.player2?.fullName
+    ? `${entry.player1.fullName} / ${entry.player2.fullName}`
+    : entry.player1.fullName;
 }
+
+type QueuedAction = () => Promise<unknown>;
 
 export default function LiveMatchPage() {
   const params = useParams<{ matchId: string }>();
@@ -21,16 +25,67 @@ export default function LiveMatchPage() {
   const { state, error } = useMatchState(matchId);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [offlineQueued, setOfflineQueued] = useState(0);
+  const [online, setOnline] = useState(true);
+  const queueRef = useRef<QueuedAction[]>([]);
 
   const canOfficiate = !!user && OFFICIATE_ROLES.includes(user.role);
 
+  useEffect(() => {
+    function syncOnline() {
+      setOnline(navigator.onLine);
+    }
+    syncOnline();
+    window.addEventListener("online", syncOnline);
+    window.addEventListener("offline", syncOnline);
+    return () => {
+      window.removeEventListener("online", syncOnline);
+      window.removeEventListener("offline", syncOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!online || queueRef.current.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setBusy(true);
+      while (queueRef.current.length > 0 && navigator.onLine && !cancelled) {
+        const next = queueRef.current[0];
+        try {
+          await next();
+          queueRef.current.shift();
+          setOfflineQueued(queueRef.current.length);
+        } catch (err) {
+          setActionError(err instanceof ApiError ? err.message : "Queued action failed.");
+          break;
+        }
+      }
+      setBusy(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [online]);
+
   async function runAction(fn: () => Promise<unknown>) {
     setActionError(null);
+    if (!navigator.onLine) {
+      queueRef.current.push(fn);
+      setOfflineQueued(queueRef.current.length);
+      setActionError(`Offline — action queued (${queueRef.current.length}). Will sync when back online.`);
+      return;
+    }
     setBusy(true);
     try {
       await fn();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Action failed.");
+      if (err instanceof TypeError || (err instanceof ApiError && err.status >= 500)) {
+        queueRef.current.push(fn);
+        setOfflineQueued(queueRef.current.length);
+        setActionError("Network issue — action queued for retry.");
+      } else {
+        setActionError(err instanceof ApiError ? err.message : "Action failed.");
+      }
     } finally {
       setBusy(false);
     }
@@ -46,7 +101,17 @@ export default function LiveMatchPage() {
     <div className="mx-auto max-w-2xl">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-white">Live Scoring</h1>
-        <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase text-slate-300">{state.status}</span>
+        <div className="flex items-center gap-2">
+          {!online && (
+            <span className="rounded-full bg-amber-900/60 px-3 py-1 text-xs uppercase text-amber-200">Offline</span>
+          )}
+          {offlineQueued > 0 && (
+            <span className="rounded-full bg-sky-900/60 px-3 py-1 text-xs text-sky-200">
+              Queue {offlineQueued}
+            </span>
+          )}
+          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase text-slate-300">{state.status}</span>
+        </div>
       </div>
 
       {actionError && <p className="mb-4 rounded-md bg-red-950 px-3 py-2 text-sm text-red-300">{actionError}</p>}

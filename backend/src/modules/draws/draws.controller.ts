@@ -23,6 +23,15 @@ export const generate = wrap(async (req, res) => {
   res.status(201).json(draw);
 });
 
+export const advance = wrap(async (req, res) => {
+  const current = await drawsService.getCurrentDraw(req.params.categoryId);
+  const updated =
+    current.format === "TEHSIL_KNOCKOUT"
+      ? await drawsService.advanceTehsilKnockout(req.params.categoryId)
+      : await drawsService.advanceGroupKnockout(req.params.categoryId);
+  res.status(200).json(updated);
+});
+
 export const lock = wrap(async (req, res) => {
   const draw = await drawsService.lockDraw(req.params.categoryId);
   res.status(200).json(draw);

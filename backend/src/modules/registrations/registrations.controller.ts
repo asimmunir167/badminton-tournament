@@ -4,10 +4,12 @@ import {
   createPaymentSchema,
   createRegistrationSchema,
   listRegistrationsQuerySchema,
+  submitPaymentSchema,
   updatePaymentSchema,
   updateRegistrationStatusSchema,
 } from "./registrations.validation";
 import { ApiError } from "../../middleware/errorHandler";
+import { absoluteUploadUrl } from "../../lib/uploads";
 
 function wrap(handler: (req: Request, res: Response) => Promise<void>): RequestHandler {
   return (req, res, next: NextFunction) => {
@@ -85,5 +87,26 @@ export const createPayment = wrap(async (req, res) => {
 export const updatePayment = wrap(async (req, res) => {
   const input = updatePaymentSchema.parse(req.body);
   const payment = await registrationsService.updatePayment(req.params.id, input);
+  res.status(200).json(payment);
+});
+
+export const submitPayment = wrap(async (req, res) => {
+  if (!req.user) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  const input = submitPaymentSchema.parse(req.body);
+  const payment = await registrationsService.submitPlayerPayment(req.params.id, req.user.sub, input);
+  res.status(200).json(payment);
+});
+
+export const uploadProof = wrap(async (req, res) => {
+  if (!req.user) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!req.file) {
+    throw new ApiError(400, "No receipt image was uploaded");
+  }
+  const proofUrl = absoluteUploadUrl(req, req.file.filename);
+  const payment = await registrationsService.uploadPaymentProof(req.params.id, req.user.sub, proofUrl);
   res.status(200).json(payment);
 });

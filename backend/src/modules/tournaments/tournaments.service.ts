@@ -56,12 +56,17 @@ export async function createTournament(input: CreateTournamentInput, createdById
 
 export async function updateTournament(id: string, input: UpdateTournamentInput) {
   const existing = await getTournament(id);
-  const { scoringConfig, ...rest } = input;
+  const { scoringConfig, paymentAccounts, ...rest } = input;
 
   return prisma.tournament.update({
     where: { id },
     data: {
       ...rest,
+      ...(paymentAccounts === null
+        ? { paymentAccounts: Prisma.DbNull }
+        : paymentAccounts !== undefined
+          ? { paymentAccounts }
+          : {}),
       ...(scoringConfig
         ? { scoringConfig: { ...(existing.scoringConfig as Prisma.JsonObject), ...scoringConfig } }
         : {}),

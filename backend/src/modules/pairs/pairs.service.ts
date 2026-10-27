@@ -33,6 +33,27 @@ async function getRequesterPlayer(userId: string) {
   return player;
 }
 
+/** A player may only have one standing ACTIVE doubles partnership at a time. */
+export async function getActivePairForPlayer(playerId: string) {
+  return prisma.pair.findFirst({
+    where: {
+      status: "ACTIVE",
+      OR: [{ player1Id: playerId }, { player2Id: playerId }],
+    },
+    include: { player1: { select: PLAYER_SELECT }, player2: { select: PLAYER_SELECT } },
+  });
+}
+
+async function assertPlayerIsAvailableForPairing(playerId: string, who: "You are" | "This player is") {
+  const active = await getActivePairForPlayer(playerId);
+  if (active) {
+    throw new ApiError(
+      409,
+      `${who} already paired with someone else. Leave or wait until that partnership ends before sending or accepting new requests.`,
+    );
+  }
+}
+
 export async function listMyPairs(userId: string) {
   const player = await getRequesterPlayer(userId);
   return prisma.pair.findMany({
@@ -73,6 +94,9 @@ export async function createPairRequest(userId: string, partnerPlayerId: string)
     throw new ApiError(404, "Partner player not found");
   }
 
+  await assertPlayerIsAvailableForPairing(requester.id, "You are");
+  await assertPlayerIsAvailableForPairing(partnerPlayerId, "This player is");
+
   const existing = await prisma.pair.findFirst({
     where: {
       status: { in: ["PENDING", "ACTIVE"] },
@@ -110,10 +134,42 @@ async function getPairAsRecipient(id: string, userId: string) {
 
 export async function acceptPair(id: string, userId: string) {
   const pair = await getPairAsRecipient(id, userId);
-  return prisma.pair.update({
-    where: { id: pair.id },
-    data: { status: "ACTIVE", respondedAt: new Date() },
-    include: { player1: { select: PLAYER_SELECT }, player2: { select: PLAYER_SELECT } },
+
+  // Either player may have become locked into another ACTIVE pair while this
+  // request was pending — refuse rather than creating a second partnership.
+  const requesterActive = await getActivePairForPlayer(pair.player1Id);
+  if (requesterActive) {
+    throw new ApiError(409, "The requester is already paired with someone else");
+  }
+  const recipientActive = await getActivePairForPlayer(pair.player2Id);
+  if (recipientActive) {
+    throw new ApiError(409, "You are already paired with someone else");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.pair.update({
+      where: { id: pair.id },
+      data: { status: "ACTIVE", respondedAt: new Date() },
+      include: { player1: { select: PLAYER_SELECT }, player2: { select: PLAYER_SELECT } },
+    });
+
+    // Once a standing pair is formed, cancel every other pending request that
+    // involves either player so nobody else can still "claim" them.
+    await tx.pair.updateMany({
+      where: {
+        id: { not: pair.id },
+        status: "PENDING",
+        OR: [
+          { player1Id: pair.player1Id },
+          { player2Id: pair.player1Id },
+          { player1Id: pair.player2Id },
+          { player2Id: pair.player2Id },
+        ],
+      },
+      data: { status: "DECLINED", respondedAt: new Date() },
+    });
+
+    return updated;
   });
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -18,10 +18,13 @@ import { useAuth } from '../lib/auth-context';
 import { apiFetch, uploadFile, ApiError } from '../lib/api';
 import { colors, radius, spacing } from '../lib/theme';
 import { calculateAge, formatCnicInput, isValidCnic, isValidDob } from '../lib/format';
+import { PUNJAB_DISTRICTS, tehsilsForDistrictCode } from '../lib/punjab-locations';
+import { PickerField } from '../components/picker-field';
 
-interface District {
+interface ApiDistrict {
   id: string;
   name: string;
+  code: string;
 }
 
 interface PickedPhoto {
@@ -33,12 +36,13 @@ interface PickedPhoto {
 export default function RegisterScreen() {
   const { registerWithPassword } = useAuth();
   const router = useRouter();
-  const [districts, setDistricts] = useState<District[]>([]);
+  const [apiDistricts, setApiDistricts] = useState<ApiDistrict[]>([]);
+  const [districtCode, setDistrictCode] = useState('');
+  const [tehsilName, setTehsilName] = useState('');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [password, setPassword] = useState('');
-  const [districtId, setDistrictId] = useState('');
   const [dob, setDob] = useState('');
   const [cnic, setCnic] = useState('');
   const [gender, setGender] = useState<'MALE' | 'FEMALE'>('MALE');
@@ -49,13 +53,29 @@ export default function RegisterScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    apiFetch<District[]>('/api/districts')
-      .then((data) => {
-        setDistricts(data);
-        if (data.length > 0) setDistrictId(data[0].id);
-      })
+    apiFetch<ApiDistrict[]>('/api/districts')
+      .then(setApiDistricts)
       .catch(() => {});
   }, []);
+
+  const districtOptions = useMemo(
+    () => PUNJAB_DISTRICTS.map((d) => ({ value: d.code, label: d.name })),
+    [],
+  );
+
+  const tehsilOptions = useMemo(() => {
+    if (!districtCode) return [];
+    const district = PUNJAB_DISTRICTS.find((d) => d.code === districtCode);
+    return tehsilsForDistrictCode(districtCode, district?.name).map((name) => ({
+      value: name,
+      label: name,
+    }));
+  }, [districtCode]);
+
+  function onDistrictChange(code: string) {
+    setDistrictCode(code);
+    setTehsilName('');
+  }
 
   async function pickPhoto() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -76,8 +96,18 @@ export default function RegisterScreen() {
 
   async function onSubmit() {
     setError(null);
-    if (!districtId) {
+    if (!districtCode) {
       setError('Please select a district.');
+      return;
+    }
+    if (!tehsilName) {
+      setError('Please select your tehsil.');
+      return;
+    }
+    const district = apiDistricts.find((d) => d.code === districtCode);
+    if (!district) {
+      const label = PUNJAB_DISTRICTS.find((d) => d.code === districtCode)?.name ?? 'This district';
+      setError(`${label} is not open for registration yet. Ask the admin to add it first.`);
       return;
     }
     if (!isValidDob(dob)) {
@@ -98,7 +128,7 @@ export default function RegisterScreen() {
       // hook). If this fails, the account still exists — create-profile.tsx
       // remains available as a fallback to finish this step later.
       try {
-        await apiFetch(`/api/districts/${districtId}/players`, {
+        await apiFetch(`/api/districts/${district.id}/players`, {
           method: 'POST',
           token: result.accessToken,
           body: {
@@ -107,6 +137,7 @@ export default function RegisterScreen() {
             dob: new Date(dob).toISOString(),
             cnic,
             phone: mobileNumber.trim() || undefined,
+            tehsilName,
             preferredCategoryGender: categoryGender,
             preferredCategoryType: categoryType,
           },
@@ -191,18 +222,22 @@ export default function RegisterScreen() {
           <Text style={styles.label}>Password</Text>
           <TextInput style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
 
-          <Text style={styles.label}>District</Text>
-          <View style={styles.pillRow}>
-            {districts.map((d) => (
-              <Pressable
-                key={d.id}
-                style={[styles.pill, districtId === d.id && styles.pillActive]}
-                onPress={() => setDistrictId(d.id)}
-              >
-                <Text style={[styles.pillText, districtId === d.id && styles.pillTextActive]}>{d.name}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <PickerField
+            label="District"
+            value={districtCode}
+            options={districtOptions}
+            onChange={onDistrictChange}
+            placeholder="Select your district"
+          />
+
+          <PickerField
+            label="Tehsil"
+            value={tehsilName}
+            options={tehsilOptions}
+            onChange={setTehsilName}
+            placeholder={districtCode ? 'Select your tehsil' : 'Select district first'}
+            disabled={!districtCode}
+          />
 
           <Text style={styles.label}>Date of Birth (YYYY-MM-DD)</Text>
           <TextInput style={styles.input} placeholder="2005-03-14" value={dob} onChangeText={setDob} />

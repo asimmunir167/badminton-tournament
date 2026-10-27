@@ -2,7 +2,7 @@ import { RegistrationStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/errorHandler";
 import { createNotification } from "../notifications/notifications.service";
-import type { CreatePaymentInput, CreateRegistrationInput, UpdatePaymentInput } from "./registrations.validation";
+import type { CreatePaymentInput, CreateRegistrationInput, SubmitPaymentInput, UpdatePaymentInput } from "./registrations.validation";
 
 export async function listRegistrationsForTournament(tournamentId: string, status?: RegistrationStatus) {
   return prisma.registration.findMany({
@@ -80,10 +80,58 @@ export async function createRegistration(tournamentId: string, input: CreateRegi
   }
 
   const duplicate = await prisma.registration.findFirst({
-    where: { tournamentId, playerId: input.playerId, categoryId: input.categoryId },
+    where: {
+      tournamentId,
+      categoryId: input.categoryId,
+      status: { not: "REJECTED" },
+      OR: [
+        { playerId: input.playerId },
+        { partnerPlayerId: input.playerId },
+        ...(partnerPlayerId
+          ? [{ playerId: partnerPlayerId }, { partnerPlayerId: partnerPlayerId }]
+          : []),
+      ],
+    },
   });
   if (duplicate) {
-    throw new ApiError(409, "This player is already registered for this category");
+    const involvesPartner =
+      partnerPlayerId &&
+      (duplicate.playerId === partnerPlayerId || duplicate.partnerPlayerId === partnerPlayerId);
+    throw new ApiError(
+      409,
+      involvesPartner
+        ? "You or your partner is already registered for this category (one application covers both players)"
+        : "This player is already registered for this category",
+    );
+  }
+
+  // Applying with an ACTIVE pair: one registration covers both players.
+  // Partner is auto-confirmed (consent already given when the pair was formed).
+  if (input.pairId && partnerPlayerId) {
+    const partnerHasActivePair = await prisma.pair.findFirst({
+      where: {
+        id: input.pairId,
+        status: "ACTIVE",
+        OR: [
+          { player1Id: input.playerId, player2Id: partnerPlayerId },
+          { player1Id: partnerPlayerId, player2Id: input.playerId },
+        ],
+      },
+    });
+    if (!partnerHasActivePair) {
+      throw new ApiError(409, "Apply with your confirmed active pair only");
+    }
+  }
+
+  // The entry fee amount always comes from the category's own entryFee, never
+  // from client input — otherwise a player could submit an arbitrary amount.
+  const feeRequired = category.entryFee != null && Number(category.entryFee) > 0;
+  const method = input.method ?? "MANUAL";
+  if (feeRequired && method !== "MANUAL" && !input.transactionRef?.trim()) {
+    throw new ApiError(
+      400,
+      "Enter the JazzCash, Easypaisa, or bank transaction ID after you send the fee",
+    );
   }
 
   return prisma.registration.create({
@@ -94,8 +142,16 @@ export async function createRegistration(tournamentId: string, input: CreateRegi
       partnerPlayerId,
       partnerConfirmedAt,
       pairId: input.pairId,
-      ...(input.amount
-        ? { payment: { create: { amount: input.amount, method: input.method ?? "MANUAL" } } }
+      ...(feeRequired
+        ? {
+            payment: {
+              create: {
+                amount: category.entryFee!,
+                method,
+                transactionRef: input.transactionRef,
+              },
+            },
+          }
         : {}),
     },
     include: { payment: true },
@@ -111,7 +167,7 @@ export async function listMyRegistrations(userId: string) {
   const registrations = await prisma.registration.findMany({
     where: { OR: [{ playerId: player.id }, { partnerPlayerId: player.id }] },
     orderBy: { submittedAt: "desc" },
-    include: { category: true, tournament: true, partner: true, player: true },
+    include: { category: true, tournament: true, partner: true, player: true, payment: true },
   });
 
   return Promise.all(
@@ -187,7 +243,7 @@ export async function declinePartner(id: string, userId: string) {
 export async function reviewRegistration(id: string, status: "APPROVED" | "REJECTED", reviewerId: string) {
   const registration = await prisma.registration.findUnique({
     where: { id },
-    include: { category: true, tournament: true, player: true },
+    include: { category: true, tournament: true, player: true, payment: true },
   });
   if (!registration) {
     throw new ApiError(404, "Registration not found");
@@ -197,6 +253,10 @@ export async function reviewRegistration(id: string, status: "APPROVED" | "REJEC
   }
   if (status === "APPROVED" && registration.category?.type === "DOUBLES" && !registration.partnerConfirmedAt) {
     throw new ApiError(409, "The partner has not confirmed this pairing yet");
+  }
+  const feeRequired = registration.category?.entryFee != null && Number(registration.category.entryFee) > 0;
+  if (status === "APPROVED" && feeRequired && registration.payment?.status !== "PAID") {
+    throw new ApiError(409, "The entry fee for this category has not been marked as paid yet");
   }
 
   const result = await prisma.$transaction(async (tx) => {
@@ -290,18 +350,117 @@ export async function createPayment(registrationId: string, input: CreatePayment
 export async function updatePayment(registrationId: string, input: UpdatePaymentInput) {
   const registration = await prisma.registration.findUnique({
     where: { id: registrationId },
-    include: { payment: true },
+    include: { payment: true, player: true, category: true, tournament: true },
   });
   if (!registration || !registration.payment) {
     throw new ApiError(404, "No payment record exists for this registration");
   }
 
-  return prisma.payment.update({
+  const payment = await prisma.payment.update({
     where: { registrationId },
     data: {
       status: input.status,
       transactionRef: input.transactionRef,
       paidAt: input.status === "PAID" ? new Date() : registration.payment.paidAt,
     },
+  });
+
+  if (input.status === "PAID" && registration.payment.status !== "PAID" && registration.player?.userId) {
+    const categoryName = registration.category?.name ?? "your category";
+    const tournamentName = registration.tournament?.name ?? "the tournament";
+    await createNotification({
+      userId: registration.player.userId,
+      type: "PAYMENT_RECEIVED",
+      title: "Payment Confirmed",
+      body: `Your entry fee for ${categoryName} in ${tournamentName} has been confirmed.`,
+      data: { registrationId },
+    });
+  }
+
+  return payment;
+}
+
+export async function submitPlayerPayment(registrationId: string, userId: string, input: SubmitPaymentInput) {
+  const registration = await prisma.registration.findUnique({
+    where: { id: registrationId },
+    include: { payment: true, player: true, category: true, partner: true },
+  });
+  if (!registration) {
+    throw new ApiError(404, "Registration not found");
+  }
+  if (registration.player?.userId !== userId && registration.partner?.userId !== userId) {
+    throw new ApiError(403, "You are not a player on this registration");
+  }
+  if (registration.status === "REJECTED") {
+    throw new ApiError(409, "This registration is no longer pending");
+  }
+
+  const feeRequired = registration.category?.entryFee != null && Number(registration.category.entryFee) > 0;
+  if (!feeRequired) {
+    throw new ApiError(400, "This category does not require an entry fee");
+  }
+  if (input.method !== "MANUAL" && !input.transactionRef?.trim()) {
+    throw new ApiError(400, "Enter the JazzCash, Easypaisa, or bank transaction ID after you send the fee");
+  }
+  if (registration.payment?.status === "PAID") {
+    throw new ApiError(409, "This payment has already been confirmed");
+  }
+
+  if (!registration.payment) {
+    return prisma.payment.create({
+      data: {
+        registrationId,
+        amount: registration.category!.entryFee!,
+        method: input.method,
+        transactionRef: input.transactionRef,
+        status: "PENDING",
+      },
+    });
+  }
+
+  return prisma.payment.update({
+    where: { registrationId },
+    data: {
+      method: input.method,
+      transactionRef: input.transactionRef,
+      status: "PENDING",
+    },
+  });
+}
+
+export async function uploadPaymentProof(registrationId: string, userId: string, proofUrl: string) {
+  const registration = await prisma.registration.findUnique({
+    where: { id: registrationId },
+    include: { payment: true, player: true, partner: true, category: true },
+  });
+  if (!registration) {
+    throw new ApiError(404, "Registration not found");
+  }
+  if (registration.player?.userId !== userId && registration.partner?.userId !== userId) {
+    throw new ApiError(403, "You are not a player on this registration");
+  }
+  if (registration.payment?.status === "PAID") {
+    throw new ApiError(409, "This payment has already been confirmed");
+  }
+
+  if (!registration.payment) {
+    const feeRequired = registration.category?.entryFee != null && Number(registration.category.entryFee) > 0;
+    if (!feeRequired) {
+      throw new ApiError(400, "This category does not require an entry fee");
+    }
+    return prisma.payment.create({
+      data: {
+        registrationId,
+        amount: registration.category!.entryFee!,
+        method: "MANUAL",
+        proofUrl,
+        status: "PENDING",
+      },
+    });
+  }
+
+  return prisma.payment.update({
+    where: { registrationId },
+    data: { proofUrl },
   });
 }

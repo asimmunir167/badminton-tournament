@@ -14,10 +14,15 @@ export const createPlayerSchema = z.object({
   photoUrl: z.string().url().optional(),
   phone: z.string().min(7).max(20).optional(),
   teamId: z.string().uuid().optional(),
+  tehsilId: z.string().uuid().optional(),
+  tehsilName: z.string().min(2).max(120).optional(),
   idDocumentUrl: z.string().url().optional(),
   playingLevel: playingLevelEnum.optional(),
   preferredCategoryType: categoryTypeEnum.optional(),
   preferredCategoryGender: categoryGenderEnum.optional(),
+}).refine((data) => data.tehsilId || data.tehsilName, {
+  message: "Tehsil is required",
+  path: ["tehsilId"],
 });
 
 export const updatePlayerSchema = z.object({
@@ -29,6 +34,7 @@ export const updatePlayerSchema = z.object({
   photoUrl: z.string().url().optional(),
   phone: z.string().min(7).max(20).optional(),
   teamId: z.string().uuid().nullable().optional(),
+  tehsilId: z.string().uuid().optional(),
   idDocumentUrl: z.string().url().optional(),
   playingLevel: playingLevelEnum.optional(),
   preferredCategoryType: categoryTypeEnum.optional(),
